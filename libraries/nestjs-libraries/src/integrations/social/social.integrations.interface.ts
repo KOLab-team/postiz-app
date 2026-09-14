@@ -1,4 +1,5 @@
 import { Integration } from '@prisma/client';
+import type { SocialEngagement } from './social.engagement';
 
 export interface ClientInformation {
   client_id: string;
@@ -139,6 +140,7 @@ export interface SocialProvider
   extends IAuthenticator,
     ISocialMediaIntegration {
   identifier: string;
+  engagement?: SocialEngagement;
   refreshWait?: boolean;
   convertToJPEG?: boolean;
   stripLinks?: () => boolean;
