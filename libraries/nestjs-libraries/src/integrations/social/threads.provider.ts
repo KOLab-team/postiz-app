@@ -13,15 +13,19 @@ import { capitalize, chunk } from 'lodash';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { Integration } from '@prisma/client';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { ThreadsEngagement } from './threads.engagement';
 
 export class ThreadsProvider extends SocialAbstract implements SocialProvider {
   identifier = 'threads';
+  engagement = new ThreadsEngagement();
   name = 'Threads';
   isBetweenSteps = false;
   scopes = [
     'threads_basic',
     'threads_content_publish',
     'threads_manage_replies',
+    'threads_read_replies',
+    'threads_delete',
     'threads_manage_insights',
     // 'threads_profile_discovery',
   ];
@@ -431,11 +435,9 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
 
-    const { data, ...all } = await (
-      await fetch(
-        `https://graph.threads.net/v1.0/${id}/threads_insights?metric=views,likes,replies,reposts,quotes&access_token=${accessToken}&period=day&since=${since}&until=${until}`
-      )
-    ).json();
+    const data = await this.engagement.accountInsights(
+      accessToken, id, since, until
+    );
 
     return (
       data?.map((d: any) => ({

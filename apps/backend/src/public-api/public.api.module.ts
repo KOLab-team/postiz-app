@@ -10,12 +10,18 @@ import { ExtractContentService } from '@gitroom/nestjs-libraries/openai/extract.
 import { CodesService } from '@gitroom/nestjs-libraries/services/codes.service';
 import { PublicIntegrationsController } from '@gitroom/backend/public-api/routes/v1/public.integrations.controller';
 import { PublicAuthMiddleware } from '@gitroom/backend/services/auth/public.auth.middleware';
+import { PublicEngagementController } from './routes/v1/public.engagement.controller';
+import { PublicEngagementService } from './public.engagement.service';
 
-const authenticatedController = [PublicIntegrationsController];
+const authenticatedController = [
+  PublicIntegrationsController,
+  PublicEngagementController,
+];
 @Module({
   imports: [UploadModule],
   controllers: [...authenticatedController],
   providers: [
+    PublicEngagementService,
     AuthService,
     StripeService,
     OpenaiService,
@@ -34,4 +40,3 @@ export class PublicApiModule implements NestModule {
     consumer.apply(PublicAuthMiddleware).forRoutes(...authenticatedController);
   }
 }
-
