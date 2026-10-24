@@ -83,9 +83,9 @@ describe('Instagram DM public API service', () => {
     ctx.fetchMock
       .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
       .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'self-scoped' }] } }))
-      .mockResolvedValueOnce(ctx.json({ data: [{ id: '456', message: 'Hello' }] }));
+      .mockResolvedValueOnce(ctx.json({ data: [{ id: '456', message: 'Hello', attachments: { data: [{ type: 'image' }] } }] }));
     await expect(ctx.service.messages('org', 'channel', '123', { limit: 20, after: 'cursor' }))
-      .resolves.toMatchObject({ data: [{ id: '456', message: 'Hello' }] });
+      .resolves.toMatchObject({ data: [{ id: '456', message: 'Hello', attachments: { data: [{ type: 'image' }] } }] });
     expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('/123/messages?');
     expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('after=cursor');
   });

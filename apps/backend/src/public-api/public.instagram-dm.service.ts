@@ -190,8 +190,9 @@ export class PublicInstagramDmService {
         from?: { id: string; username?: string };
         to?: { data?: { id: string; username?: string }[] };
         message?: string;
+        attachments?: { data?: unknown[] };
       }>>(integration, `${conversationId}/messages`, {
-        fields: 'id,created_time,from,to,message',
+        fields: 'id,created_time,from,to,message,attachments',
         limit: String(query.limit),
         ...(query.after ? { after: query.after } : {}),
       }, token);

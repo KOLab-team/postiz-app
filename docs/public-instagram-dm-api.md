@@ -30,7 +30,8 @@ Authorization: {postiz-api-key}
 Both endpoints return `{ integrationId, data, paging: { after } }`; the messages
 endpoint also returns `conversationId`. Pass a non-null `paging.after` into the
 next call. Limits are 1–20. The message endpoint checks that the conversation
-contains the connected Instagram account. Neither endpoint sends or changes DMs.
+contains the connected Instagram account. Message records include text and
+available attachment metadata. Neither endpoint sends or changes DMs.
 
 Meta does not return inactive Requests-folder conversations after 30 days, and
 the conversation API can expose only a limited recent message history. For
