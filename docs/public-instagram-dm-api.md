@@ -17,6 +17,10 @@ Use the existing Postiz public API key as the raw `Authorization` header. The ke
 organization must own the integration. Tokens stay in Postiz and are never
 returned by the endpoints.
 
+For multiple Iris instances, connect each account in the matching Postiz
+organization and give that Iris instance only that organization's public API
+key. Integration IDs from another organization return 404.
+
 ```http
 GET /api/public/v1/integrations/{integrationId}/instagram-dms/conversations?limit=20&after={cursor}
 GET /api/public/v1/integrations/{integrationId}/instagram-dms/conversations/{conversationId}/messages?limit=20&after={cursor}
