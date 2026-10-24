@@ -63,29 +63,31 @@ describe('Instagram DM public API service', () => {
     const [url, options] = ctx.fetchMock.mock.calls[0];
     expect(String(url)).toContain('/v25.0/200/conversations');
     expect(String(url)).toContain('limit=10');
+    expect(String(url)).not.toContain('platform=');
     expect(String(url)).not.toContain('secret-token');
     expect(options.headers.Authorization).toBe('Bearer secret-token');
   });
 
   it('refuses messages when the conversation does not include the connected account', async () => {
     const ctx = setup();
-    ctx.fetchMock.mockResolvedValue(ctx.json({
-      id: '123', participants: { data: [{ id: '999' }] },
-    }));
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: '999' }] } }));
     await expect(ctx.service.messages('org', 'channel', '123', { limit: 20 }))
       .rejects.toMatchObject({ status: 404 });
-    expect(ctx.fetchMock).toHaveBeenCalledTimes(1);
+    expect(ctx.fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('reads only a verified conversation and does not follow Meta paging URLs', async () => {
     const ctx = setup();
     ctx.fetchMock
-      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: '200' }] } }))
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'self-scoped' }] } }))
       .mockResolvedValueOnce(ctx.json({ data: [{ id: '456', message: 'Hello' }] }));
     await expect(ctx.service.messages('org', 'channel', '123', { limit: 20, after: 'cursor' }))
       .resolves.toMatchObject({ data: [{ id: '456', message: 'Hello' }] });
-    expect(String(ctx.fetchMock.mock.calls[1][0])).toContain('/123/messages?');
-    expect(String(ctx.fetchMock.mock.calls[1][0])).toContain('after=cursor');
+    expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('/123/messages?');
+    expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('after=cursor');
   });
 
   it('checks that a Facebook Page token belongs to the connected Instagram account', async () => {

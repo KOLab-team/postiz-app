@@ -143,7 +143,7 @@ export class PublicInstagramDmService {
         updated_time?: string;
         participants?: { data?: { id: string; name?: string; username?: string }[] };
       }>>(integration, `${accountId}/conversations`, {
-        platform: 'instagram',
+        ...(integration.providerIdentifier === 'instagram' ? { platform: 'instagram' } : {}),
         fields: 'id,updated_time,participants',
         limit: String(query.limit),
         ...(query.after ? { after: query.after } : {}),
@@ -164,13 +164,24 @@ export class PublicInstagramDmService {
     return this.withToken(integration, async (token) => {
       // Resolve the owning account first. A Page token must match the saved IG account.
       await this.accountPath(integration, token);
+      const ownerIds = [integration.internalId];
+      if (integration.providerIdentifier === 'instagram-standalone') {
+        // Instagram Login exposes both a professional user_id and an Instagram-
+        // scoped id. Conversation participants may use the latter.
+        const me = await this.graph<{ id?: string; user_id?: string }>(
+          integration, 'me', { fields: 'id,user_id' }, token
+        );
+        if (me.user_id !== integration.internalId || !me.id)
+          throw new ForbiddenException('The token does not belong to this Instagram account.');
+        ownerIds.push(me.id);
+      }
       const conversation = await this.graph<{
         id?: string;
         participants?: { data?: { id?: string }[] };
       }>(integration, conversationId, { fields: 'id,participants' }, token);
       if (
         conversation.id !== conversationId ||
-        !conversation.participants?.data?.some((p) => p.id === integration.internalId)
+        !conversation.participants?.data?.some((p) => p.id && ownerIds.includes(p.id))
       )
         throw new NotFoundException('Instagram conversation not found for this channel.');
       const result = await this.graph<GraphPage<{
