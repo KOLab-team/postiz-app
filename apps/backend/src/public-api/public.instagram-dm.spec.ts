@@ -90,19 +90,21 @@ describe('Instagram DM public API service', () => {
     expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('after=cursor');
   });
 
-  it('reads a prefixed conversation ID returned by the list endpoint', async () => {
-    const ctx = setup();
+  it('reads a prefixed Page conversation ID returned by the list endpoint', async () => {
+    const ctx = setup('instagram');
     ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'page', instagram_business_account: { id: '200' } }))
       .mockResolvedValueOnce(ctx.json({ data: [{ id: 't_123' }] }))
-      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
-      .mockResolvedValueOnce(ctx.json({ id: 't_123', participants: { data: [{ id: 'self-scoped' }] } }))
+      .mockResolvedValueOnce(ctx.json({ id: 'page', instagram_business_account: { id: '200' } }))
+      .mockResolvedValueOnce(ctx.json({ id: 't_123', participants: { data: [{ id: '200' }] } }))
       .mockResolvedValueOnce(ctx.json({ data: [{ id: 'message-1', message: 'Hello' }] }));
     const listed = await ctx.service.conversations('org', 'channel', { limit: 20 });
     const conversationId = listed.data[0].id;
     const messages = await ctx.service.messages('org', 'channel', conversationId, { limit: 20 });
     expect(messages).toMatchObject({ conversationId: 't_123', data: [{ message: 'Hello' }] });
-    expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('/t_123?');
-    expect(String(ctx.fetchMock.mock.calls[3][0])).toContain('/t_123/messages?');
+    expect(String(ctx.fetchMock.mock.calls[1][0])).toContain('platform=instagram');
+    expect(String(ctx.fetchMock.mock.calls[3][0])).toContain('/t_123?');
+    expect(String(ctx.fetchMock.mock.calls[4][0])).toContain('/t_123/messages?');
   });
 
   it('rejects path separators in conversation IDs before calling Meta', async () => {
