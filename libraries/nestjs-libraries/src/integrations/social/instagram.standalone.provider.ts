@@ -29,7 +29,9 @@ export class InstagramStandaloneProvider
     'instagram_business_content_publish',
     'instagram_business_manage_comments',
     'instagram_business_manage_insights',
-    'instagram_business_manage_messages',
+    ...(process.env.POSTIZ_INSTAGRAM_DM_OAUTH_ENABLED === 'true'
+      ? ['instagram_business_manage_messages']
+      : []),
   ];
   override maxConcurrentJob = 10; // Instagram standalone has stricter limits
   dto = InstagramDto;

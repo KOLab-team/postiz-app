@@ -8,8 +8,11 @@ Instagram professional account. Both Postiz connection types are supported:
 | `instagram-standalone` | Instagram Login | `instagram_business_manage_messages` |
 | `instagram` | Facebook Business Login | `instagram_manage_messages`, `pages_manage_metadata` |
 
-Postiz requests these scopes during account connection. An account connected before
-this change must be **reconnected in Postiz** to grant the new scopes. Meta may
+Postiz requests these messaging scopes during account connection only when
+`POSTIZ_INSTAGRAM_DM_OAUTH_ENABLED=true` is set on the Postiz backend. It is off
+by default, so a code deployment does not change publishing connections.
+When activating DM access, enable the flag and **reconnect the account in
+Postiz** to grant the new scopes. Meta may
 require Advanced Access and app review to read conversations with people outside
 the app's roles. The connected account must be an Instagram professional account.
 
