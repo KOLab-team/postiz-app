@@ -95,7 +95,10 @@ export class PublicInstagramDmService {
     // require a new Facebook authorization when they cease to work.
     const standalone = integration.providerIdentifier === 'instagram-standalone';
     const refresh = async () => {
-      const refreshed = await this.refresh.refresh(integration);
+      // A DM GET must never disconnect an account used for publishing.
+      const refreshed = await this.refresh.refresh(integration, {
+        disconnectOnFailure: false,
+      });
       if (refreshed === false || !refreshed.accessToken)
         throw new UnauthorizedException('Reconnect Instagram in Postiz to restore DM access.');
       integration.token = refreshed.accessToken;
@@ -158,7 +161,7 @@ export class PublicInstagramDmService {
     conversationId: string,
     query: InstagramDmPageQuery
   ) {
-    if (!/^\d{1,64}$/.test(conversationId))
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(conversationId))
       throw new BadRequestException('Invalid Instagram conversation ID.');
     const integration = await this.integration(orgId, integrationId);
     return this.withToken(integration, async (token) => {

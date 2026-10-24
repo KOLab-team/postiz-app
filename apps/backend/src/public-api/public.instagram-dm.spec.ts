@@ -90,6 +90,28 @@ describe('Instagram DM public API service', () => {
     expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('after=cursor');
   });
 
+  it('reads a prefixed conversation ID returned by the list endpoint', async () => {
+    const ctx = setup();
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ data: [{ id: 't_123' }] }))
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: 't_123', participants: { data: [{ id: 'self-scoped' }] } }))
+      .mockResolvedValueOnce(ctx.json({ data: [{ id: 'message-1', message: 'Hello' }] }));
+    const listed = await ctx.service.conversations('org', 'channel', { limit: 20 });
+    const conversationId = listed.data[0].id;
+    const messages = await ctx.service.messages('org', 'channel', conversationId, { limit: 20 });
+    expect(messages).toMatchObject({ conversationId: 't_123', data: [{ message: 'Hello' }] });
+    expect(String(ctx.fetchMock.mock.calls[2][0])).toContain('/t_123?');
+    expect(String(ctx.fetchMock.mock.calls[3][0])).toContain('/t_123/messages?');
+  });
+
+  it('rejects path separators in conversation IDs before calling Meta', async () => {
+    const ctx = setup();
+    await expect(ctx.service.messages('org', 'channel', 't_../other', { limit: 20 }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(ctx.fetchMock).not.toHaveBeenCalled();
+  });
+
   it('checks that a Facebook Page token belongs to the connected Instagram account', async () => {
     const ctx = setup('instagram');
     ctx.fetchMock.mockResolvedValue(ctx.json({
@@ -114,7 +136,33 @@ describe('Instagram DM public API service', () => {
     ctx.integration.tokenExpiration = new Date(0) as any;
     ctx.fetchMock.mockResolvedValue(ctx.json({ data: [] }));
     await ctx.service.conversations('org', 'channel', { limit: 20 });
-    expect(ctx.refresh.refresh).toHaveBeenCalledTimes(1);
+    expect(ctx.refresh.refresh).toHaveBeenCalledWith(ctx.integration, {
+      disconnectOnFailure: false,
+    });
     expect(ctx.fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer new-token');
+  });
+
+  it('returns an authorization error without reading when safe refresh fails', async () => {
+    const ctx = setup();
+    ctx.integration.tokenExpiration = new Date(0) as any;
+    ctx.refresh.refresh.mockResolvedValue(false);
+    await expect(ctx.service.conversations('org', 'channel', { limit: 20 }))
+      .rejects.toMatchObject({ status: 401 });
+    expect(ctx.refresh.refresh).toHaveBeenCalledWith(ctx.integration, {
+      disconnectOnFailure: false,
+    });
+    expect(ctx.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the channel when Meta returns 401 and retry refresh fails', async () => {
+    const ctx = setup();
+    ctx.fetchMock.mockResolvedValue(ctx.json({ error: { code: 190 } }, 401));
+    ctx.refresh.refresh.mockResolvedValue(false);
+    await expect(ctx.service.conversations('org', 'channel', { limit: 20 }))
+      .rejects.toMatchObject({ status: 401 });
+    expect(ctx.refresh.refresh).toHaveBeenCalledWith(ctx.integration, {
+      disconnectOnFailure: false,
+    });
+    expect(ctx.fetchMock).toHaveBeenCalledTimes(1);
   });
 });

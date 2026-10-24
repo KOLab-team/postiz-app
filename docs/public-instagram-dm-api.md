@@ -34,7 +34,10 @@ Both endpoints return `{ integrationId, data, paging: { after } }`; the messages
 endpoint also returns `conversationId`. Pass a non-null `paging.after` into the
 next call. Limits are 1–20. The message endpoint checks that the conversation
 contains the connected Instagram account. Message records include text and
-available attachment metadata. Neither endpoint sends or changes DMs.
+available attachment metadata. Conversation IDs are opaque path-safe strings,
+including Meta IDs prefixed with `t_`. Neither endpoint sends or changes DMs.
+A failed DM token refresh returns an authorization error without disconnecting
+the publishing channel.
 
 Meta does not return inactive Requests-folder conversations after 30 days, and
 the conversation API can expose only a limited recent message history. For
