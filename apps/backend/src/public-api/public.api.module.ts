@@ -12,16 +12,20 @@ import { PublicIntegrationsController } from '@gitroom/backend/public-api/routes
 import { PublicAuthMiddleware } from '@gitroom/backend/services/auth/public.auth.middleware';
 import { PublicEngagementController } from './routes/v1/public.engagement.controller';
 import { PublicEngagementService } from './public.engagement.service';
+import { PublicInstagramDmController } from './routes/v1/public.instagram-dm.controller';
+import { PublicInstagramDmService } from './public.instagram-dm.service';
 
 const authenticatedController = [
   PublicIntegrationsController,
   PublicEngagementController,
+  PublicInstagramDmController,
 ];
 @Module({
   imports: [UploadModule],
   controllers: [...authenticatedController],
   providers: [
     PublicEngagementService,
+    PublicInstagramDmService,
     AuthService,
     StripeService,
     OpenaiService,

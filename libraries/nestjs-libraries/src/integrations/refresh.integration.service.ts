@@ -14,14 +14,27 @@ export class RefreshIntegrationService {
     @Inject(forwardRef(() => IntegrationService))
     private _integrationService: IntegrationService
   ) {}
-  async refresh(integration: Integration): Promise<false | AuthTokenDetails> {
+  async refresh(
+    integration: Integration,
+    options: { disconnectOnFailure?: boolean } = {}
+  ): Promise<false | AuthTokenDetails> {
     const socialProvider = this._integrationManager.getSocialIntegration(
       integration.providerIdentifier
     );
 
-    const refresh = await this.refreshProcess(integration, socialProvider);
+    const refresh = await this.refreshProcess(
+      integration,
+      socialProvider,
+      options.disconnectOnFailure !== false
+    );
 
-    if (!refresh) {
+    // Some providers return a truthy object with no token when Meta rejects
+    // refresh. Never persist that result during a non-destructive DM read.
+    if (
+      !refresh ||
+      (options.disconnectOnFailure === false &&
+        (!refresh.accessToken || !refresh.refreshToken || !refresh.expiresIn))
+    ) {
       return false as const;
     }
 
@@ -44,25 +57,27 @@ export class RefreshIntegrationService {
 
   private async refreshProcess(
     integration: Integration,
-    socialProvider: SocialProvider
+    socialProvider: SocialProvider,
+    disconnectOnFailure: boolean
   ): Promise<AuthTokenDetails | false> {
     const refresh: false | AuthTokenDetails = await socialProvider
       .refreshToken(integration.refreshToken)
       .catch((err) => false);
 
     if (!refresh) {
-      await this._integrationService.refreshNeeded(
-        integration.organizationId,
-        integration.id
-      );
+      if (disconnectOnFailure) {
+        await this._integrationService.refreshNeeded(
+          integration.organizationId,
+          integration.id
+        );
 
-      await this._integrationService.informAboutRefreshError(
-        integration.organizationId,
-        integration
-      );
+        await this._integrationService.informAboutRefreshError(
+          integration.organizationId,
+          integration
+        );
 
-      await this._integrationService.disconnectChannel(integration.organizationId, integration);
-
+        await this._integrationService.disconnectChannel(integration.organizationId, integration);
+      }
       return false;
     }
 
