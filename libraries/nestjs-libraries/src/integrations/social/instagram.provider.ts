@@ -32,9 +32,8 @@ export class InstagramProvider
     'instagram_content_publish',
     'instagram_manage_comments',
     'instagram_manage_insights',
-    ...(process.env.POSTIZ_INSTAGRAM_DM_OAUTH_ENABLED === 'true'
-      ? ['instagram_manage_messages', 'pages_manage_metadata']
-      : []),
+    'instagram_manage_messages',
+    'pages_manage_metadata',
   ];
   override maxConcurrentJob = 10;
   editor = 'normal' as const;
