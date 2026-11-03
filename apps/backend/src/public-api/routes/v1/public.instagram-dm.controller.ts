@@ -1,8 +1,8 @@
-import { Controller, Get, Param, Query, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Organization } from '@prisma/client';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
-import { InstagramDmPageQuery } from '../../instagram-dm.dto';
+import { InstagramDmPageQuery, InstagramDmReplyBody } from '../../instagram-dm.dto';
 import { PublicInstagramDmService } from '../../public.instagram-dm.service';
 
 @ApiTags('Public API — Instagram DMs')
@@ -28,5 +28,15 @@ export class PublicInstagramDmController {
     @Query() query: InstagramDmPageQuery
   ) {
     return this.dms.messages(org.id, integrationId, conversationId, query);
+  }
+
+  @Post('/conversations/:conversationId/replies')
+  reply(
+    @GetOrgFromRequest() org: Organization,
+    @Param('integrationId') integrationId: string,
+    @Param('conversationId') conversationId: string,
+    @Body() body: InstagramDmReplyBody
+  ) {
+    return this.dms.reply(org.id, integrationId, conversationId, body.text);
   }
 }
