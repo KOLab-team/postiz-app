@@ -17,6 +17,7 @@ type GraphPage<T> = {
   paging?: { cursors?: { after?: string }; next?: string };
 };
 type GraphError = { error?: { code?: number; type?: string; error_subcode?: number } };
+type Participant = { id?: string; name?: string; username?: string };
 
 const GRAPH_VERSION = 'v25.0';
 const GRAPH_TIMEOUT_MS = 12000;
@@ -53,7 +54,8 @@ export class PublicInstagramDmService {
     integration: Integration,
     path: string,
     params: Record<string, string>,
-    token: string
+    token: string,
+    body?: object
   ): Promise<T> {
     // Paths are made only from IDs checked by the caller. No Meta paging URL is followed.
     const url = new URL(`https://${this.graphHost(integration)}/${GRAPH_VERSION}/${path}`);
@@ -61,11 +63,19 @@ export class PublicInstagramDmService {
     let response: Response;
     try {
       response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        method: body ? 'POST' : 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
         signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
       });
     } catch {
-      throw new BadGatewayException('Instagram did not respond.');
+      throw new BadGatewayException(body
+        ? 'Instagram did not confirm the reply. Check the conversation before trying again.'
+        : 'Instagram did not respond.');
     }
     if (!response.ok) {
       // Meta's body and URLs can contain credentials. Expose only a fixed message.
@@ -78,7 +88,11 @@ export class PublicInstagramDmService {
         throw new HttpException('Instagram rate limit reached. Retry later.', 429);
       if (response.status === 404)
         throw new NotFoundException('Instagram conversation not found.');
-      throw new BadGatewayException('Instagram could not complete the DM read.');
+      if (body && response.status === 400)
+        throw new BadRequestException('Instagram rejected this reply. Check that the conversation is eligible for replies.');
+      throw new BadGatewayException(body
+        ? 'Instagram could not confirm the reply. Check the conversation before trying again.'
+        : 'Instagram could not complete the DM read.');
     }
     try {
       return (await response.json()) as T;
@@ -137,6 +151,35 @@ export class PublicInstagramDmService {
     return page.id;
   }
 
+  private async verifiedConversation(
+    integration: Integration,
+    conversationId: string,
+    token: string
+  ) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(conversationId))
+      throw new BadRequestException('Invalid Instagram conversation ID.');
+    const accountId = await this.accountPath(integration, token);
+    const ownerIds = [integration.internalId, accountId];
+    if (integration.providerIdentifier === 'instagram-standalone') {
+      const me = await this.graph<{ id?: string; user_id?: string }>(
+        integration, 'me', { fields: 'id,user_id' }, token
+      );
+      if (me.user_id !== integration.internalId || !me.id)
+        throw new ForbiddenException('The token does not belong to this Instagram account.');
+      ownerIds.push(me.id);
+    }
+    const conversation = await this.graph<{
+      id?: string;
+      participants?: { data?: Participant[] };
+    }>(integration, conversationId, { fields: 'id,participants' }, token);
+    const participants = conversation.participants?.data ?? [];
+    if (
+      conversation.id !== conversationId ||
+      !participants.some((participant) => participant.id && ownerIds.includes(participant.id))
+    ) throw new NotFoundException('Instagram conversation not found for this channel.');
+    return { accountId, ownerIds, participants };
+  }
+
   async conversations(orgId: string, integrationId: string, query: InstagramDmPageQuery) {
     const integration = await this.integration(orgId, integrationId);
     return this.withToken(integration, async (token) => {
@@ -165,28 +208,7 @@ export class PublicInstagramDmService {
       throw new BadRequestException('Invalid Instagram conversation ID.');
     const integration = await this.integration(orgId, integrationId);
     return this.withToken(integration, async (token) => {
-      // Resolve the owning account first. A Page token must match the saved IG account.
-      await this.accountPath(integration, token);
-      const ownerIds = [integration.internalId];
-      if (integration.providerIdentifier === 'instagram-standalone') {
-        // Instagram Login exposes both a professional user_id and an Instagram-
-        // scoped id. Conversation participants may use the latter.
-        const me = await this.graph<{ id?: string; user_id?: string }>(
-          integration, 'me', { fields: 'id,user_id' }, token
-        );
-        if (me.user_id !== integration.internalId || !me.id)
-          throw new ForbiddenException('The token does not belong to this Instagram account.');
-        ownerIds.push(me.id);
-      }
-      const conversation = await this.graph<{
-        id?: string;
-        participants?: { data?: { id?: string }[] };
-      }>(integration, conversationId, { fields: 'id,participants' }, token);
-      if (
-        conversation.id !== conversationId ||
-        !conversation.participants?.data?.some((p) => p.id && ownerIds.includes(p.id))
-      )
-        throw new NotFoundException('Instagram conversation not found for this channel.');
+      const verified = await this.verifiedConversation(integration, conversationId, token);
       const result = await this.graph<GraphPage<{
         id: string;
         created_time?: string;
@@ -199,7 +221,41 @@ export class PublicInstagramDmService {
         limit: String(query.limit),
         ...(query.after ? { after: query.after } : {}),
       }, token);
-      return { integrationId, conversationId, ...this.page(result) };
+      return {
+        integrationId,
+        conversationId,
+        accountParticipantId: verified.participants.find((participant) =>
+          participant.id && verified.ownerIds.includes(participant.id)
+        )?.id,
+        ...this.page(result),
+      };
     });
+  }
+
+  async reply(orgId: string, integrationId: string, conversationId: string, text: string) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(conversationId))
+      throw new BadRequestException('Invalid Instagram conversation ID.');
+    const integration = await this.integration(orgId, integrationId);
+    // The read-only verification may refresh a token. The send itself is never replayed.
+    const { accountId, ownerIds, participants } = await this.withToken(
+      integration, (token) => this.verifiedConversation(integration, conversationId, token)
+    );
+    const token = integration.token;
+    const recipients = participants.filter((participant) =>
+      participant.id && !ownerIds.includes(participant.id)
+    );
+    if (recipients.length !== 1 || participants.length !== 2)
+      throw new BadRequestException('This conversation does not have one verified recipient.');
+    const sent = await this.graph<{ recipient_id?: string; message_id?: string }>(
+      integration, `${accountId}/messages`, {}, token,
+      {
+        recipient: { id: recipients[0].id },
+        message: { text },
+        ...(integration.providerIdentifier === 'instagram' ? { message_type: 'RESPONSE' } : {}),
+      }
+    );
+    if (!sent.message_id || sent.recipient_id !== recipients[0].id)
+      throw new BadGatewayException('Instagram did not confirm the reply. Check the conversation before trying again.');
+    return { messageId: sent.message_id };
   }
 }
