@@ -167,4 +167,40 @@ describe('Instagram DM public API service', () => {
     });
     expect(ctx.fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('sends a reply only to the other participant of a verified conversation', async () => {
+    const ctx = setup();
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'self-scoped' }, { id: 'customer' }] } }))
+      .mockResolvedValueOnce(ctx.json({ recipient_id: 'customer', message_id: 'sent-1' }));
+    await expect(ctx.service.reply('org', 'channel', '123', 'Thanks!'))
+      .resolves.toEqual({ messageId: 'sent-1' });
+    expect(ctx.fetchMock).toHaveBeenCalledTimes(3);
+    const [url, options] = ctx.fetchMock.mock.calls[2];
+    expect(String(url)).toContain('/v25.0/200/messages');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ recipient: { id: 'customer' }, message: { text: 'Thanks!' } });
+  });
+
+  it('refuses to send if the conversation belongs to another account', async () => {
+    const ctx = setup();
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'other' }, { id: 'customer' }] } }));
+    await expect(ctx.service.reply('org', 'channel', '123', 'Hello'))
+      .rejects.toMatchObject({ status: 404 });
+    expect(ctx.fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('never retries a send with an uncertain outcome', async () => {
+    const ctx = setup();
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'self-scoped' }, { id: 'customer' }] } }))
+      .mockRejectedValueOnce(new Error('timeout'));
+    await expect(ctx.service.reply('org', 'channel', '123', 'Hello'))
+      .rejects.toMatchObject({ status: 502 });
+    expect(ctx.fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

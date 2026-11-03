@@ -34,6 +34,8 @@ import { AutopostController } from '@gitroom/backend/api/routes/autopost.control
 import { SetsController } from '@gitroom/backend/api/routes/sets.controller';
 import { ThirdPartyController } from '@gitroom/backend/api/routes/third-party.controller';
 import { MonitorController } from '@gitroom/backend/api/routes/monitor.controller';
+import { InstagramDmsController } from '@gitroom/backend/api/routes/instagram-dms.controller';
+import { PublicInstagramDmService } from '@gitroom/backend/public-api/public.instagram-dm.service';
 
 const authenticatedController = [
   UsersController,
@@ -53,6 +55,7 @@ const authenticatedController = [
   AutopostController,
   SetsController,
   ThirdPartyController,
+  InstagramDmsController,
 ];
 @Module({
   imports: [UploadModule],
@@ -74,6 +77,7 @@ const authenticatedController = [
     PermissionsService,
     CodesService,
     IntegrationManager,
+    PublicInstagramDmService,
     TrackService,
     ShortLinkService,
     Nowpayments,

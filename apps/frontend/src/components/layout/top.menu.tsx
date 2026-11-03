@@ -42,6 +42,16 @@ export const useMenuItem = () => {
       path: '/launches',
     },
     {
+      name: 'Inbox',
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 5.5h16v11H15l-3 3-3-3H4v-11Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d="M7.5 9.5h9m-9 3h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      ),
+      path: '/instagram-dms',
+    },
+    {
       name: 'Agent',
       icon: (
         <svg

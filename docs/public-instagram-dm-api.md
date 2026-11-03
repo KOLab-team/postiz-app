@@ -40,6 +40,22 @@ including Meta IDs prefixed with `t_`. Neither endpoint sends or changes DMs.
 A failed DM token refresh returns an authorization error without disconnecting
 the publishing channel.
 
+## Signed-in Postiz inbox
+
+The **Inbox** menu opens `/instagram-dms`. Members of the selected Postiz
+organization can choose a connected Instagram account, read its conversations,
+page through messages, and send text replies. The browser uses the normal
+Postiz session; it never receives a Meta token or public API key. Replies go
+through the authenticated Postiz endpoint
+`POST /api/instagram-dms/{integrationId}/conversations/{conversationId}/replies`.
+Postiz verifies that the conversation belongs to the connected account and
+derives the sole recipient from its participants before sending. The public
+API and Iris DM tools remain read-only.
+
+Meta permits replies only to eligible conversations started by an Instagram
+user. If a send times out or Meta does not confirm it, check the conversation
+before retrying to avoid a duplicate reply.
+
 Meta does not return inactive Requests-folder conversations after 30 days, and
 the conversation API can expose only a limited recent message history. For
 ongoing full history, a later webhook ingestion service would be needed.

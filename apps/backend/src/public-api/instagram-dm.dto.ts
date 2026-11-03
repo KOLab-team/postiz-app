@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class InstagramDmPageQuery {
   @IsOptional()
@@ -13,4 +13,12 @@ export class InstagramDmPageQuery {
   @IsString()
   @MaxLength(512)
   after?: string;
+}
+
+export class InstagramDmReplyBody {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
+  @Matches(/\S/, { message: 'text must contain non-whitespace characters' })
+  text: string;
 }
