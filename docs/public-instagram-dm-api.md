@@ -1,6 +1,6 @@
-# Read Instagram DMs through Postiz
+# Read and reply to Instagram DMs through Postiz
 
-The public API exposes read-only Instagram Direct Message endpoints for a connected
+The public API exposes Instagram Direct Message endpoints for a connected
 Instagram professional account. Both Postiz connection types are supported:
 
 | Postiz provider | Meta login | Required messaging permission |
@@ -28,15 +28,22 @@ key. Integration IDs from another organization return 404.
 ```http
 GET /api/public/v1/integrations/{integrationId}/instagram-dms/conversations?limit=20&after={cursor}
 GET /api/public/v1/integrations/{integrationId}/instagram-dms/conversations/{conversationId}/messages?limit=20&after={cursor}
+POST /api/public/v1/integrations/{integrationId}/instagram-dms/conversations/{conversationId}/replies
 Authorization: {postiz-api-key}
 ```
 
-Both endpoints return `{ integrationId, data, paging: { after } }`; the messages
+The reply request body is `{"text":"..."}` (1–1000 characters). It returns
+`{ messageId }` after Meta confirms the send. Postiz verifies that the
+conversation belongs to the connected account and derives the sole recipient
+from Meta's participant list. A failed or uncertain send is never retried
+automatically. Check the conversation before manually retrying.
+
+Both GET endpoints return `{ integrationId, data, paging: { after } }`; the messages
 endpoint also returns `conversationId`. Pass a non-null `paging.after` into the
 next call. Limits are 1–20. The message endpoint checks that the conversation
 contains the connected Instagram account. Message records include text and
 available attachment metadata. Conversation IDs are opaque path-safe strings,
-including Meta IDs prefixed with `t_`. Neither endpoint sends or changes DMs.
+including Meta IDs prefixed with `t_`. The GET endpoints do not change DMs.
 A failed DM token refresh returns an authorization error without disconnecting
 the publishing channel.
 
@@ -49,8 +56,9 @@ Postiz session; it never receives a Meta token or public API key. Replies go
 through the authenticated Postiz endpoint
 `POST /api/instagram-dms/{integrationId}/conversations/{conversationId}/replies`.
 Postiz verifies that the conversation belongs to the connected account and
-derives the sole recipient from its participants before sending. The public
-API and Iris DM tools remain read-only.
+derives the sole recipient from its participants before sending. The Iris MCP
+bridge can use the same public reply endpoint when its pod has the matching
+organization's DM key.
 
 Meta permits replies only to eligible conversations started by an Instagram
 user. If a send times out or Meta does not confirm it, check the conversation
