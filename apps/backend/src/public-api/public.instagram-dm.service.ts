@@ -16,7 +16,7 @@ type GraphPage<T> = {
   data?: T[];
   paging?: { cursors?: { after?: string }; next?: string };
 };
-type GraphError = { error?: { code?: number; type?: string; error_subcode?: number } };
+type GraphError = { error?: { code?: number; type?: string; error_subcode?: number; message?: string } };
 type Participant = { id?: string; name?: string; username?: string };
 
 const GRAPH_VERSION = 'v25.0';
@@ -79,11 +79,20 @@ export class PublicInstagramDmService {
     }
     if (!response.ok) {
       // Meta's body and URLs can contain credentials. Expose only a fixed message.
-      const body = (await response.json().catch(() => ({}))) as GraphError;
-      if (body.error?.code === 190 || response.status === 401)
+      const graphError = (await response.json().catch(() => ({}))) as GraphError;
+      if (graphError.error?.code === 190 || response.status === 401)
         throw new UnauthorizedException('Reconnect Instagram in Postiz to restore DM access.');
-      if ([10, 200].includes(body.error?.code ?? 0) || response.status === 403)
-        throw new ForbiddenException('Instagram messaging permission is missing. Reconnect in Postiz and check Meta app access.');
+      // Meta also uses code 10 / HTTP 403 when the messaging window has closed.
+      // Classify by its explanation, since a code alone does not prove the cause.
+      // Never include Meta's raw error in our response.
+      if (body && /outside (?:of )?(?:the )?(?:allowed|messaging|24-hour) window|more than 24 hours/i.test(graphError.error?.message ?? ''))
+        throw new ForbiddenException('Instagram’s API reply window has closed for this conversation. Use the Instagram app if it permits a reply, or wait for the person to message again.');
+      if (graphError.error?.code === 200)
+        throw new ForbiddenException('Meta denied Instagram messaging access. Check the app’s messaging permission and access level.');
+      if (graphError.error?.code === 10 || response.status === 403)
+        throw new ForbiddenException(body
+          ? 'Meta rejected this Instagram reply. Check the reply window and app access before retrying.'
+          : 'Meta denied Instagram DM access. Check the app access and connection.');
       if (response.status === 429)
         throw new HttpException('Instagram rate limit reached. Retry later.', 429);
       if (response.status === 404)

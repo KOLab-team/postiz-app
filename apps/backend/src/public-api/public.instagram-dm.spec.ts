@@ -124,13 +124,42 @@ describe('Instagram DM public API service', () => {
     expect(ctx.fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('maps permission failures to a safe reconnect message without leaking Meta errors', async () => {
+  it('maps permission failures without claiming a reconnect will fix them', async () => {
     const ctx = setup();
     ctx.fetchMock.mockResolvedValue(ctx.json({
       error: { code: 200, message: 'access_token=secret-token' },
     }, 400));
     await expect(ctx.service.conversations('org', 'channel', { limit: 20 }))
-      .rejects.toMatchObject({ status: 403 });
+      .rejects.toMatchObject({
+        status: 403,
+        message: 'Meta denied Instagram messaging access. Check the app’s messaging permission and access level.',
+      });
+  });
+
+  it('identifies a closed reply window without sending a second DM or exposing Meta details', async () => {
+    const ctx = setup();
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'self-scoped' }, { id: 'customer' }] } }))
+      .mockResolvedValueOnce(ctx.json({
+        error: { code: 10, error_subcode: 2534022, message: 'This message is sent outside of allowed window. access_token=secret-token' },
+      }, 403));
+    await expect(ctx.service.reply('org', 'channel', '123', 'Hello'))
+      .rejects.toMatchObject({
+        status: 403,
+        message: 'Instagram’s API reply window has closed for this conversation. Use the Instagram app if it permits a reply, or wait for the person to message again.',
+      });
+    expect(ctx.fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not label an unclassified Meta 403 as a missing permission', async () => {
+    const ctx = setup();
+    ctx.fetchMock.mockResolvedValue(ctx.json({ error: { code: 10 } }, 403));
+    await expect(ctx.service.conversations('org', 'channel', { limit: 20 }))
+      .rejects.toMatchObject({
+        status: 403,
+        message: 'Meta denied Instagram DM access. Check the app access and connection.',
+      });
   });
 
   it('refreshes an expired Instagram Login token once before reading', async () => {
