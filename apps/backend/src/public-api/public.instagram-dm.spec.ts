@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { PublicInstagramDmService } from './public.instagram-dm.service';
+import { ValidationPipe } from '@nestjs/common';
+import { InstagramDmReplyBody } from './instagram-dm.dto';
 
 jest.mock(
   '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
@@ -9,6 +11,8 @@ jest.mock(
   '@gitroom/nestjs-libraries/integrations/refresh.integration.service',
   () => ({ RefreshIntegrationService: class {} })
 );
+
+jest.mock('@gitroom/nestjs-libraries/social-inbox/instagram-dm-health.service', () => ({ InstagramDmHealthService: class {} }));
 
 function setup(providerIdentifier = 'instagram-standalone') {
   const integration = {
@@ -27,7 +31,8 @@ function setup(providerIdentifier = 'instagram-standalone') {
     getIntegrationById: jest.fn().mockResolvedValue(integration),
   };
   const refresh = { refresh: jest.fn().mockResolvedValue({ accessToken: 'new-token' }) };
-  const service = new PublicInstagramDmService(integrations as any, refresh as any);
+  const health = { reconnectRequired: jest.fn().mockResolvedValue(undefined) };
+  const service = new PublicInstagramDmService(integrations as any, refresh as any, health as any);
   const fetchMock = jest.fn();
   global.fetch = fetchMock as any;
   const json = (body: unknown, status = 200) => ({
@@ -35,7 +40,7 @@ function setup(providerIdentifier = 'instagram-standalone') {
     status,
     json: async () => body,
   });
-  return { service, integration, integrations, refresh, fetchMock, json };
+  return { service, integration, integrations, refresh, health, fetchMock, json };
 }
 
 describe('Instagram DM public API service', () => {
@@ -231,5 +236,96 @@ describe('Instagram DM public API service', () => {
     await expect(ctx.service.reply('org', 'channel', '123', 'Hello'))
       .rejects.toMatchObject({ status: 502 });
     expect(ctx.fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+
+describe('Instagram DM reliability regressions', () => {
+  const originalFlag = process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED;
+  beforeEach(() => { delete process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED; });
+  afterEach(() => {
+    if (originalFlag === undefined) delete process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED;
+    else process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED = originalFlag;
+  });
+  function verified(ctx: ReturnType<typeof setup>, provider = 'instagram-standalone') {
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json(provider === 'instagram' ? { id: 'page', instagram_business_account: { id: '200' } } : { id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: provider === 'instagram' ? '200' : 'self-scoped' }, { id: 'customer' }] } }));
+  }
+  it('sends links unchanged with the correct Page response parameter', async () => {
+    const ctx = setup('instagram'); verified(ctx, 'instagram');
+    ctx.fetchMock.mockResolvedValueOnce(ctx.json({ recipient_id: 'customer', message_id: 'sent-1' }));
+    const text = 'Here is the Reel: https://www.instagram.com/reel/example/?x=1&y=2';
+    await ctx.service.reply('org', 'channel', '123', text);
+    expect(JSON.parse(ctx.fetchMock.mock.calls[2][1].body)).toEqual({ recipient: { id: 'customer' }, message: { text }, messaging_type: 'RESPONSE' });
+    expect(ctx.health.reconnectRequired).not.toHaveBeenCalled();
+  });
+  it('checks UTF-8 bytes before contacting Meta', async () => {
+    const ctx = setup();
+    await expect(ctx.service.reply('org', 'channel', '123', '好'.repeat(334))).rejects.toMatchObject({ status: 400 });
+    expect(ctx.fetchMock).not.toHaveBeenCalled();
+  });
+  it('requires app enablement before a human reply', async () => {
+    const ctx = setup();
+    await expect(ctx.service.replyAsHumanAgent('org', 'channel', '123', 'Hello')).rejects.toMatchObject({ status: 403 });
+    expect(ctx.fetchMock).not.toHaveBeenCalled();
+  });
+  it.each(['instagram', 'instagram-standalone'])('uses the human tag only for an explicit human reply on %s', async provider => {
+    process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED = 'true';
+    const ctx = setup(provider); verified(ctx, provider);
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ data: [{ from: { id: 'customer' }, created_time: new Date(Date.now() - 48 * 3600000).toISOString() }] }))
+      .mockResolvedValueOnce(ctx.json({ recipient_id: 'customer', message_id: 'sent-1' }));
+    await ctx.service.replyAsHumanAgent('org', 'channel', '123', 'Following up on your question');
+    const payload = JSON.parse(ctx.fetchMock.mock.calls[3][1].body);
+    expect(payload.tag).toBe('HUMAN_AGENT');
+    if (provider === 'instagram') expect(payload.messaging_type).toBe('MESSAGE_TAG');
+  });
+  it.each([null, new Date(Date.now() - 8 * 86400000).toISOString()])('rejects human replies without a verified recent customer message (%s)', async timestamp => {
+    process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED = 'true';
+    const ctx = setup(); verified(ctx);
+    ctx.fetchMock.mockResolvedValueOnce(ctx.json({ data: [{ from: { id: timestamp ? 'customer' : 'self-scoped' }, created_time: timestamp || new Date().toISOString() }] }));
+    await expect(ctx.service.replyAsHumanAgent('org', 'channel', '123', 'Hello')).rejects.toMatchObject({ status: 403 });
+    expect(ctx.fetchMock.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
+  });
+  it('alerts on failed token recovery without disconnecting the publishing channel', async () => {
+    const ctx = setup();
+    ctx.fetchMock.mockResolvedValue(ctx.json({ error: { code: 190 } }, 401));
+    ctx.refresh.refresh.mockResolvedValue(false);
+    await expect(ctx.service.conversations('org', 'channel', { limit: 20 })).rejects.toMatchObject({ status: 401 });
+    expect(ctx.health.reconnectRequired).toHaveBeenCalledTimes(1);
+    expect(ctx.integration.disabled).toBe(false);
+  });
+  it('does not alert when safe token refresh recovers access', async () => {
+    const ctx = setup();
+    ctx.fetchMock.mockResolvedValueOnce(ctx.json({ error: { code: 190 } }, 401)).mockResolvedValueOnce(ctx.json({ data: [] }));
+    await ctx.service.conversations('org', 'channel', { limit: 20 });
+    expect(ctx.health.reconnectRequired).not.toHaveBeenCalled();
+  });
+  it('alerts if access expires between verification and send, without replaying the send', async () => {
+    const ctx = setup(); verified(ctx);
+    ctx.fetchMock.mockResolvedValueOnce(ctx.json({ error: { code: 190 } }, 401));
+    await expect(ctx.service.reply('org', 'channel', '123', 'Hello')).rejects.toMatchObject({ status: 401 });
+    expect(ctx.health.reconnectRequired).toHaveBeenCalledTimes(1);
+    expect(ctx.fetchMock.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(1);
+    expect(ctx.refresh.refresh).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Instagram public API boundary', () => {
+  it('does not accept the human-only option from an API-key caller', async () => {
+    const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+    await expect(pipe.transform({ text: 'Hello', humanAgent: true }, { type: 'body', metatype: InstagramDmReplyBody })).rejects.toMatchObject({ status: 400 });
+  });
+  it('keeps rejected links intact and does not replay a send', async () => {
+    const ctx = setup();
+    ctx.fetchMock
+      .mockResolvedValueOnce(ctx.json({ id: 'self-scoped', user_id: '200' }))
+      .mockResolvedValueOnce(ctx.json({ id: '123', participants: { data: [{ id: 'self-scoped' }, { id: 'customer' }] } }))
+      .mockResolvedValueOnce(ctx.json({ error: { code: 100, message: 'This URL is blocked. access_token=secret-token' } }, 400));
+    await expect(ctx.service.reply('org', 'channel', '123', 'https://example.com')).rejects.toMatchObject({ status: 400, message: 'Instagram rejected a link in this reply. Check the URL or share the post from Instagram.' });
+    expect(ctx.fetchMock.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(1);
+    expect(ctx.health.reconnectRequired).not.toHaveBeenCalled();
   });
 });
