@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { InstagramDmHealthService } from '@gitroom/nestjs-libraries/social-inbox/instagram-dm-health.service';
 import { PrismaRepository, PrismaService, PrismaTransaction } from './prisma.service';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
@@ -60,6 +61,7 @@ import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integration
     SubscriptionService,
     SubscriptionRepository,
     NotificationService,
+    InstagramDmHealthService,
     NotificationsRepository,
     WebhooksRepository,
     WebhooksService,

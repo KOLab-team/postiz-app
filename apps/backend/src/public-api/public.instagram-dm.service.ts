@@ -11,6 +11,8 @@ import { Integration } from '@prisma/client';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { InstagramDmPageQuery } from './instagram-dm.dto';
+import { InstagramDmHealthService } from '@gitroom/nestjs-libraries/social-inbox/instagram-dm-health.service';
+import { assertInstagramHumanAgentEnabled, assertInstagramHumanAgentWindow, validateInstagramDmText } from '@gitroom/nestjs-libraries/social-inbox/instagram-dm-policy';
 
 type GraphPage<T> = {
   data?: T[];
@@ -26,7 +28,8 @@ const GRAPH_TIMEOUT_MS = 12000;
 export class PublicInstagramDmService {
   constructor(
     private readonly integrations: IntegrationService,
-    private readonly refresh: RefreshIntegrationService
+    private readonly refresh: RefreshIntegrationService,
+    private readonly health: InstagramDmHealthService
   ) {}
 
   private async integration(orgId: string, id: string) {
@@ -97,6 +100,8 @@ export class PublicInstagramDmService {
         throw new HttpException('Instagram rate limit reached. Retry later.', 429);
       if (response.status === 404)
         throw new NotFoundException('Instagram conversation not found.');
+      if (body && /(?:url|link).*(?:blocked|invalid|not allowed|not supported)|(?:blocked|invalid|not allowed|not supported).*(?:url|link)/i.test(graphError.error?.message ?? ''))
+        throw new BadRequestException('Instagram rejected a link in this reply. Check the URL or share the post from Instagram.');
       if (body && response.status === 400)
         throw new BadRequestException('Instagram rejected this reply. Check that the conversation is eligible for replies.');
       throw new BadGatewayException(body
@@ -111,6 +116,18 @@ export class PublicInstagramDmService {
   }
 
   private async withToken<T>(
+    integration: Integration,
+    operation: (token: string) => Promise<T>
+  ): Promise<T> {
+    try {
+      return await this.withFreshToken(integration, operation);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) await this.health.reconnectRequired(integration);
+      throw error;
+    }
+  }
+
+  private async withFreshToken<T>(
     integration: Integration,
     operation: (token: string) => Promise<T>
   ): Promise<T> {
@@ -233,6 +250,7 @@ export class PublicInstagramDmService {
       return {
         integrationId,
         conversationId,
+        humanAgentEnabled: process.env.INSTAGRAM_DM_HUMAN_AGENT_ENABLED === 'true',
         accountParticipantId: verified.participants.find((participant) =>
           participant.id && verified.ownerIds.includes(participant.id)
         )?.id,
@@ -242,6 +260,17 @@ export class PublicInstagramDmService {
   }
 
   async reply(orgId: string, integrationId: string, conversationId: string, text: string) {
+    return this.sendReply(orgId, integrationId, conversationId, text, false);
+  }
+
+  // Called only by the session-authenticated inbox, never by the public API.
+  async replyAsHumanAgent(orgId: string, integrationId: string, conversationId: string, text: string) {
+    assertInstagramHumanAgentEnabled();
+    return this.sendReply(orgId, integrationId, conversationId, text, true);
+  }
+
+  private async sendReply(orgId: string, integrationId: string, conversationId: string, text: string, humanAgent: boolean) {
+    validateInstagramDmText(text);
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(conversationId))
       throw new BadRequestException('Invalid Instagram conversation ID.');
     const integration = await this.integration(orgId, integrationId);
@@ -249,20 +278,38 @@ export class PublicInstagramDmService {
     const { accountId, ownerIds, participants } = await this.withToken(
       integration, (token) => this.verifiedConversation(integration, conversationId, token)
     );
-    const token = integration.token;
     const recipients = participants.filter((participant) =>
       participant.id && !ownerIds.includes(participant.id)
     );
     if (recipients.length !== 1 || participants.length !== 2)
       throw new BadRequestException('This conversation does not have one verified recipient.');
-    const sent = await this.graph<{ recipient_id?: string; message_id?: string }>(
-      integration, `${accountId}/messages`, {}, token,
-      {
-        recipient: { id: recipients[0].id },
-        message: { text },
-        ...(integration.providerIdentifier === 'instagram' ? { message_type: 'RESPONSE' } : {}),
-      }
-    );
+    if (humanAgent) {
+      const recent = await this.withToken(integration, token => this.graph<GraphPage<{
+        from?: { id?: string }; created_time?: string;
+      }>>(integration, `${conversationId}/messages`, {
+        fields: 'from,created_time', limit: '20',
+      }, token));
+      const times = (recent.data ?? [])
+        .filter(message => message.from?.id === recipients[0].id)
+        .map(message => Date.parse(message.created_time ?? ''))
+        .filter(Number.isFinite);
+      assertInstagramHumanAgentWindow(times.length ? new Date(Math.max(...times)) : null);
+    }
+    let sent: { recipient_id?: string; message_id?: string };
+    try {
+      sent = await this.graph<{ recipient_id?: string; message_id?: string }>(
+        integration, `${accountId}/messages`, {}, integration.token,
+        {
+          recipient: { id: recipients[0].id },
+          message: { text },
+          ...(integration.providerIdentifier === 'instagram' ? { messaging_type: humanAgent ? 'MESSAGE_TAG' : 'RESPONSE' } : {}),
+          ...(humanAgent ? { tag: 'HUMAN_AGENT' } : {}),
+        }
+      );
+    } catch (error) {
+      if (error instanceof UnauthorizedException) await this.health.reconnectRequired(integration);
+      throw error;
+    }
     if (!sent.message_id || sent.recipient_id !== recipients[0].id)
       throw new BadGatewayException('Instagram did not confirm the reply. Check the conversation before trying again.');
     return { messageId: sent.message_id };

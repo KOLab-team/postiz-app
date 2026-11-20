@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, UsePipes, ValidationPipe } f
 import { ApiTags } from '@nestjs/swagger';
 import { Organization } from '@prisma/client';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
-import { InstagramDmPageQuery, InstagramDmReplyBody } from '../../public-api/instagram-dm.dto';
+import { InstagramDmPageQuery, InstagramDmHumanReplyBody } from '../../public-api/instagram-dm.dto';
 import { PublicInstagramDmService } from '../../public-api/public.instagram-dm.service';
 
 @ApiTags('Instagram DMs')
@@ -35,8 +35,10 @@ export class InstagramDmsController {
     @GetOrgFromRequest() org: Organization,
     @Param('integrationId') integrationId: string,
     @Param('conversationId') conversationId: string,
-    @Body() body: InstagramDmReplyBody
+    @Body() body: InstagramDmHumanReplyBody
   ) {
-    return this.dms.reply(org.id, integrationId, conversationId, body.text);
+    return body.humanAgent
+      ? this.dms.replyAsHumanAgent(org.id, integrationId, conversationId, body.text)
+      : this.dms.reply(org.id, integrationId, conversationId, body.text);
   }
 }

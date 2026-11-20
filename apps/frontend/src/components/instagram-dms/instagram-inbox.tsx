@@ -18,7 +18,7 @@ type Message = {
   attachments?: { data?: { type?: string }[] };
 };
 type Page<T> = { data: T[]; paging: { after: string | null } };
-type MessagePage = Page<Message> & { accountParticipantId?: string };
+type MessagePage = Page<Message> & { accountParticipantId?: string; humanAgentEnabled?: boolean };
 type Channel = {
   id: string;
   name: string;
@@ -53,6 +53,8 @@ export function InstagramInbox() {
   const [accountParticipantId, setAccountParticipantId] = useState('');
   const [messageAfter, setMessageAfter] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [humanAgent, setHumanAgent] = useState(false);
+  const [humanAgentEnabled, setHumanAgentEnabled] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loadingConversations, setLoadingConversations] = useState(false);
@@ -111,6 +113,7 @@ export function InstagramInbox() {
       if (current !== messageRequest.current) return;
       setMessages((old) => after ? [...old, ...page.data.filter((item) => !old.some((prev) => prev.id === item.id))] : page.data);
       setAccountParticipantId(page.accountParticipantId ?? '');
+      setHumanAgentEnabled(page.humanAgentEnabled === true);
       setMessageAfter(page.paging.after);
     } catch (err) {
       if (current === messageRequest.current) setError(errorText(err));
@@ -127,6 +130,8 @@ export function InstagramInbox() {
     setMessages([]);
     setAccountParticipantId('');
     setDraft('');
+    setHumanAgent(false);
+    setHumanAgentEnabled(false);
     setNotice('');
     setError('');
     if (channelId) void loadConversations(channelId);
@@ -137,6 +142,8 @@ export function InstagramInbox() {
     setMessages([]);
     setMessageAfter(null);
     setDraft('');
+    setHumanAgent(false);
+    setHumanAgentEnabled(false);
     setNotice('');
     setError('');
     if (channelId && conversationId) void loadMessages(channelId, conversationId);
@@ -153,7 +160,7 @@ export function InstagramInbox() {
     try {
       await request<{ messageId: string }>(
         `/instagram-dms/${encodeURIComponent(channelId)}/conversations/${encodeURIComponent(conversationId)}/replies`,
-        { method: 'POST', body: JSON.stringify({ text }) }
+        { method: 'POST', body: JSON.stringify({ text, humanAgent }) }
       );
       setDraft('');
       setNotice('Reply sent.');
@@ -226,7 +233,12 @@ export function InstagramInbox() {
             </div>;
           })}
         </div>
-        {conversationId && <form onSubmit={send} className="p-4 border-t border-newBgLineColor flex gap-3 items-end">
+        {conversationId && <form onSubmit={send} className="p-4 border-t border-newBgLineColor flex flex-wrap gap-3 items-end">
+          {humanAgentEnabled && <label className="w-full flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={humanAgent} disabled={sending}
+              onChange={(event) => setHumanAgent(event.target.checked)} />
+            Human reply to an existing inquiry (up to 7 days)
+          </label>}
           <label htmlFor="instagram-reply" className="sr-only">Reply to Instagram message</label>
           <textarea id="instagram-reply" value={draft} onChange={(event) => setDraft(event.target.value)}
             maxLength={1000} rows={2} placeholder="Write a reply…" disabled={sending}

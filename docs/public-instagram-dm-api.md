@@ -67,3 +67,24 @@ before retrying to avoid a duplicate reply.
 Meta does not return inactive Requests-folder conversations after 30 days, and
 the conversation API can expose only a limited recent message history. For
 ongoing full history, a later webhook ingestion service would be needed.
+
+## Reply reliability
+
+Text replies can contain links. The text is sent unchanged; the server validates
+Meta's 1000-byte UTF-8 limit. A rejected link is reported without substituting a
+handle, stripping the URL, or automatically replaying the message.
+
+Expired/revoked DM access triggers a workspace notification and email when safe
+token refresh cannot recover it, including when access expires just before a
+send. Redis limits this alert to once per hour per account credential. Alerts
+do not disconnect the publishing channel. A successful refresh sends no alert.
+
+Set `INSTAGRAM_DM_HUMAN_AGENT_ENABLED=true` only after Meta grants the app Human
+Agent access. The signed-in inbox then offers an explicit human-reply option.
+It requires evidence of a customer message less than seven days old and sends
+`HUMAN_AGENT`. The public API and Iris reply body remain text-only and cannot
+request this mode. Automated replies retain Meta's standard messaging window.
+The publishing-only Meta review deployment keeps messaging disabled.
+
+References: [Instagram messaging](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api)
+and [message tags](https://developers.facebook.com/docs/graph-api/reference/page/messages).

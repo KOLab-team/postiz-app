@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class InstagramDmPageQuery {
   @IsOptional()
@@ -21,4 +21,11 @@ export class InstagramDmReplyBody {
   @MaxLength(1000)
   @Matches(/\S/, { message: 'text must contain non-whitespace characters' })
   text: string;
+}
+
+// Public API callers cannot opt automated replies into the Human Agent window.
+export class InstagramDmHumanReplyBody extends InstagramDmReplyBody {
+  @IsOptional()
+  @IsBoolean()
+  humanAgent?: boolean;
 }
